@@ -789,32 +789,37 @@ else:
                     exit(1)
                 else:
                     print("STDOUT: Force deleting the nodes")
-        terminated_instances=0
+        nterminated_instances=0
         cn_summary,ip_summary,CN = get_summary(comp_ocid,cluster_name)
-        if CN != "CC": 
+        if CN != "CC":
             current_size = ip_summary.size
+        terminated_instances = []
         for instanceName in hostnames_to_remove:
             try:
                 instance_id = computeClient.list_instances(comp_ocid,display_name=instanceName).data[0].id
                 if CN == "CC":
                     ComputeClientCompositeOperations.terminate_instance_and_wait_for_state(instance_id,wait_for_states=["TERMINATING","TERMINATED"])
-                else: 
+                else:
                     instance_details = oci.core.models.DetachInstancePoolInstanceDetails(instance_id=instance_id,is_auto_terminate=True,is_decrement_size=True)
                     ComputeManagementClientCompositeOperations.detach_instance_pool_instance_and_wait_for_work_request(ipa_ocid,instance_details)
                 if dns_entries:
                     get_rr_set_response = dns_client.delete_rr_set(zone_name_or_id=zone_id,domain=instanceName+"."+zone_name,rtype="A",scope="PRIVATE")
                     ip=None
-                    for i in cn_instances: 
+                    for i in cn_instances:
                         if i['display_name'] == instanceName:
                             ip = ipaddress.ip_address(i['ip'])
                     if not ip is None:
                         index = list(private_subnet_cidr.hosts()).index(ip)+2
                         slurm_name=queue+"-"+instance_type+"-"+str(index)+"."+zone_name
                         get_rr_set_response = dns_client.delete_rr_set(zone_name_or_id=zone_id,domain=slurm_name,rtype="A",scope="PRIVATE")
-                terminated_instances = terminated_instances + 1
-                print("STDOUT: The instance "+instanceName+" is terminating")   
+                # keep track which hosts were found and where termination was requested
+                terminated_instances.append(instanceName)
+                nterminated_instances =  nterminated_instances + 1
+                print("STDOUT: The instance "+instanceName+" is terminating")
             except:
-                print("The instance "+instanceName+" does not exist")
+                print("Warning: The instance "+instanceName+" does not exist")
+        # only proceed with instances that were actually terminated
+        hostnames_to_remove = terminated_instances
         cn_summary,ip_summary,CN = get_summary(comp_ocid,cluster_name)
         if CN == "CC":
             instance_id = computeClient.list_instances(comp_ocid,display_name=hostnames_to_remove[-1]).data[0].id
